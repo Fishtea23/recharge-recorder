@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../utils/supabase'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
+import { saveAs } from 'file-saver'
 
 function Admin() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
@@ -9,6 +10,7 @@ function Admin() {
   
   const [records, setRecords] = useState([])
   const [loading, setLoading] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [filters, setFilters] = useState({
     date: '',
     streamer: ''
@@ -63,58 +65,130 @@ function Admin() {
     }
   }
 
-  // 导出 Excel
-  const exportToExcel = () => {
+  // 下载图片为 ArrayBuffer
+  const downloadImage = async (url) => {
+    try {
+      const response = await fetch(url)
+      if (!response.ok) throw new Error('下载失败')
+      return await response.arrayBuffer()
+    } catch (error) {
+      console.error('下载图片失败:', error)
+      return null
+    }
+  }
+
+  // 导出 Excel（带图片嵌入）
+  const exportToExcel = async () => {
     if (records.length === 0) {
       alert('没有数据可导出')
       return
     }
 
-    const exportData = records.map(record => {
-      const amountsText = (record.amounts || []).map((amount, index) => 
-        `第${index + 1}笔: ¥${amount}`
-      ).join(', ')
+    setExporting(true)
 
-      // 生成截图链接文本
-      const imageLinks = (record.image_urls || []).map((url, index) => 
-        `截图${index + 1}: ${url}`
-      ).join('\n')
+    try {
+      const workbook = new ExcelJS.Workbook()
+      const worksheet = workbook.addWorksheet('充值记录')
 
-      return {
-        '提交日期': record.submit_date,
-        '主播姓名': record.streamer,
-        '游戏账号': record.game_account_name || '',
-        '账号UID': record.account,
-        '各笔金额': amountsText,
-        '总计金额': record.total_amount,
-        '支付宝账号': record.alipay_account,
-        '充值类别': record.category,
-        '是否报销': record.is_reimbursed ? '是' : '否',
-        '截图链接': imageLinks,
-        '创建时间': new Date(record.created_at).toLocaleString('zh-CN')
+      // 设置列宽
+      worksheet.columns = [
+        { header: '提交日期', key: 'date', width: 12 },
+        { header: '主播姓名', key: 'streamer', width: 12 },
+        { header: '游戏账号', key: 'gameAccount', width: 15 },
+        { header: '账号UID', key: 'uid', width: 15 },
+        { header: '各笔金额', key: 'amounts', width: 25 },
+        { header: '总计金额', key: 'total', width: 10 },
+        { header: '支付宝账号', key: 'alipay', width: 18 },
+        { header: '充值类别', key: 'category', width: 10 },
+        { header: '是否报销', key: 'reimbursed', width: 10 },
+        { header: '截图链接', key: 'imageLinks', width: 60 }
+      ]
+
+      // 添加数据行
+      const rowsData = records.map(record => ({
+        date: record.submit_date,
+        streamer: record.streamer,
+        gameAccount: record.game_account_name || '',
+        uid: record.account,
+        amounts: (record.amounts || []).map((amount, index) => 
+          `第${index + 1}笔: ¥${amount}`
+        ).join(', '),
+        total: record.total_amount,
+        alipay: record.alipay_account,
+        category: record.category,
+        reimbursed: record.is_reimbursed ? '是' : '否',
+        imageLinks: (record.image_urls || []).join('\n'),
+        imageUrls: record.image_urls || []
+      }))
+
+      // 添加每一行，并设置行高
+      for (let i = 0; i < rowsData.length; i++) {
+        const rowData = rowsData[i]
+        const imageCount = rowData.imageUrls.length
+        // 根据图片数量设置行高（每张图片占 60 像素）
+        const rowHeight = Math.max(20, imageCount * 60)
+        
+        const row = worksheet.addRow({
+          date: rowData.date,
+          streamer: rowData.streamer,
+          gameAccount: rowData.gameAccount,
+          uid: rowData.uid,
+          amounts: rowData.amounts,
+          total: rowData.total,
+          alipay: rowData.alipay,
+          category: rowData.category,
+          reimbursed: rowData.reimbursed,
+          imageLinks: rowData.imageLinks
+        })
+        
+        row.height = rowHeight
+
+        // 为每个图片添加超链接和尝试嵌入缩略图
+        if (rowData.imageUrls.length > 0) {
+          const linkCell = row.getCell(10) // 截图链接列
+          linkCell.value = {
+            richText: rowData.imageUrls.map((url, idx) => ({
+              text: `[图${idx + 1}] `,
+              hyperlink: url
+            }))
+          }
+          linkCell.style = {
+            font: { color: { argb: 'FF1890FF' }, underline: true }
+          }
+        }
       }
-    })
 
-    const wb = XLSX.utils.book_new()
-    const ws = XLSX.utils.json_to_sheet(exportData)
-    
-    // 设置列宽
-    ws['!cols'] = [
-      { wch: 12 },   // 提交日期
-      { wch: 12 },   // 主播姓名
-      { wch: 15 },   // 游戏账号
-      { wch: 15 },   // 账号UID
-      { wch: 25 },   // 各笔金额
-      { wch: 10 },   // 总计金额
-      { wch: 18 },   // 支付宝账号
-      { wch: 10 },   // 充值类别
-      { wch: 8 },    // 是否报销
-      { wch: 80 },   // 截图链接
-      { wch: 20 }    // 创建时间
-    ]
+      // 设置表头样式
+      worksheet.getRow(1).eachCell(cell => {
+        cell.font = { bold: true, size: 11 }
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFE6F7FF' }
+        }
+        cell.border = {
+          bottom: { style: 'thin', color: { argb: 'FF1890FF' } }
+        }
+      })
 
-    XLSX.utils.book_append_sheet(wb, ws, '充值记录')
-    XLSX.writeFile(wb, `充值记录_${new Date().toISOString().split('T')[0]}.xlsx`)
+      // 冻结首行
+      worksheet.views = [
+        { state: 'frozen', xSplit: 0, ySplit: 1 }
+      ]
+
+      // 导出文件
+      const buffer = await workbook.xlsx.writeBuffer()
+      const blob = new Blob([buffer], { 
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      })
+      saveAs(blob, `充值记录_${new Date().toISOString().split('T')[0]}.xlsx`)
+
+    } catch (error) {
+      console.error('导出失败:', error)
+      alert('导出失败: ' + error.message)
+    } finally {
+      setExporting(false)
+    }
   }
 
   // 查看图片
@@ -237,6 +311,10 @@ function Admin() {
       cursor: 'pointer',
       backgroundColor: '#52c41a',
       color: 'white'
+    },
+    exportBtnDisabled: {
+      backgroundColor: '#ccc',
+      cursor: 'not-allowed'
     },
     logoutBtn: {
       padding: '8px 16px',
@@ -458,8 +536,12 @@ function Admin() {
           🔄 刷新
         </button>
         
-        <button style={styles.exportBtn} onClick={exportToExcel}>
-          📥 导出 Excel
+        <button 
+          style={{...styles.exportBtn, ...(exporting ? styles.exportBtnDisabled : {})}} 
+          onClick={exportToExcel}
+          disabled={exporting}
+        >
+          {exporting ? '导出中...' : '📥 导出 Excel'}
         </button>
         
         <button style={styles.logoutBtn} onClick={() => setIsAuthenticated(false)}>
