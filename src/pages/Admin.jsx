@@ -17,6 +17,7 @@ function Admin() {
   })
   const [selectedImages, setSelectedImages] = useState(null)
   const [viewingRecord, setViewingRecord] = useState(null)
+  const [deletingRecord, setDeletingRecord] = useState(null)
 
   const ADMIN_PASSWORD = 'Fishtea2332'
 
@@ -206,6 +207,56 @@ function Admin() {
     setViewingRecord(null)
   }
 
+  // 删除记录
+  const deleteRecord = async (record) => {
+    if (!confirm(`确定要删除这条记录吗？\n\n主播：${record.streamer}\n日期：${record.submit_date}\n金额：¥${record.total_amount}`)) {
+      return
+    }
+
+    setDeletingRecord(record.id)
+    try {
+      // 1. 删除存储桶中的图片
+      if (record.image_urls && record.image_urls.length > 0) {
+        for (const url of record.image_urls) {
+          try {
+            // 从 URL 中提取文件路径
+            const urlObj = new URL(url)
+            const pathMatch = urlObj.pathname.match(/\/recharge-images\/(.*)/)
+            if (pathMatch) {
+              const filePath = pathMatch[1]
+              await supabase.storage
+                .from('recharge-images')
+                .remove([filePath])
+            }
+          } catch (e) {
+            console.error('删除图片失败:', e)
+            // 继续删除其他图片，不中断流程
+          }
+        }
+      }
+
+      // 2. 删除数据库记录
+      const { error } = await supabase
+        .from('recharge_records')
+        .delete()
+        .eq('id', record.id)
+
+      if (error) {
+        throw error
+      }
+
+      // 3. 刷新列表
+      await loadRecords()
+      alert('删除成功！')
+
+    } catch (error) {
+      console.error('删除失败:', error)
+      alert('删除失败: ' + error.message)
+    } finally {
+      setDeletingRecord(null)
+    }
+  }
+
   // 获取所有主播（用于筛选）
   const uniqueStreamers = [...new Set(records.map(r => r.streamer))]
 
@@ -378,6 +429,19 @@ function Admin() {
       cursor: 'pointer',
       backgroundColor: '#722ed1',
       color: 'white'
+    },
+    deleteBtn: {
+      padding: '4px 10px',
+      fontSize: '12px',
+      border: 'none',
+      borderRadius: '4px',
+      cursor: 'pointer',
+      backgroundColor: '#ff4d4f',
+      color: 'white'
+    },
+    deleteBtnDisabled: {
+      backgroundColor: '#ffccc7',
+      cursor: 'not-allowed'
     },
     badge: {
       display: 'inline-block',
@@ -574,6 +638,7 @@ function Admin() {
                 <th style={styles.th}>类别</th>
                 <th style={styles.th}>报销</th>
                 <th style={styles.th}>截图</th>
+                <th style={styles.th}>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -614,6 +679,15 @@ function Admin() {
                         查看 ({record.image_urls.length}张)
                       </button>
                     )}
+                  </td>
+                  <td style={styles.td}>
+                    <button
+                      style={{...styles.deleteBtn, ...(deletingRecord === record.id ? styles.deleteBtnDisabled : {})}}
+                      onClick={() => deleteRecord(record)}
+                      disabled={deletingRecord === record.id}
+                    >
+                      {deletingRecord === record.id ? '删除中...' : '删除'}
+                    </button>
                   </td>
                 </tr>
               ))}
