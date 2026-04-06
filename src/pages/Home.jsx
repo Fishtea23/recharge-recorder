@@ -507,7 +507,7 @@ function Home() {
     },
     imageAmountBadge: {
       position: 'absolute',
-      bottom: '4px',
+      top: '28px',
       left: '4px',
       right: '4px',
       backgroundColor: 'rgba(24, 144, 255, 0.95)',
@@ -516,7 +516,8 @@ function Home() {
       borderRadius: '4px',
       fontSize: '14px',
       fontWeight: 'bold',
-      textAlign: 'center'
+      textAlign: 'center',
+      zIndex: 5
     },
     modal: {
       position: 'fixed',
@@ -549,7 +550,8 @@ function Home() {
       cursor: 'pointer'
     },
     imageInfo: {
-      padding: '8px'
+      padding: '8px',
+      paddingTop: '36px'
     },
     amountTypeSelect: {
       width: '100%',
