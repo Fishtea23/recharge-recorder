@@ -75,15 +75,22 @@ function Admin() {
         `第${index + 1}笔: ¥${amount}`
       ).join(', ')
 
+      // 生成截图链接文本
+      const imageLinks = (record.image_urls || []).map((url, index) => 
+        `截图${index + 1}: ${url}`
+      ).join('\n')
+
       return {
         '提交日期': record.submit_date,
         '主播姓名': record.streamer,
-        '充值账号': record.account,
+        '游戏账号': record.game_account_name || '',
+        '账号UID': record.account,
         '各笔金额': amountsText,
         '总计金额': record.total_amount,
         '支付宝账号': record.alipay_account,
         '充值类别': record.category,
         '是否报销': record.is_reimbursed ? '是' : '否',
+        '截图链接': imageLinks,
         '创建时间': new Date(record.created_at).toLocaleString('zh-CN')
       }
     })
@@ -93,15 +100,17 @@ function Admin() {
     
     // 设置列宽
     ws['!cols'] = [
-      { wch: 12 },
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 30 },
-      { wch: 12 },
-      { wch: 20 },
-      { wch: 12 },
-      { wch: 10 },
-      { wch: 20 }
+      { wch: 12 },   // 提交日期
+      { wch: 12 },   // 主播姓名
+      { wch: 15 },   // 游戏账号
+      { wch: 15 },   // 账号UID
+      { wch: 25 },   // 各笔金额
+      { wch: 10 },   // 总计金额
+      { wch: 18 },   // 支付宝账号
+      { wch: 10 },   // 充值类别
+      { wch: 8 },    // 是否报销
+      { wch: 80 },   // 截图链接
+      { wch: 20 }    // 创建时间
     ]
 
     XLSX.utils.book_append_sheet(wb, ws, '充值记录')
@@ -472,10 +481,11 @@ function Admin() {
               <tr>
                 <th style={styles.th}>日期</th>
                 <th style={styles.th}>主播</th>
-                <th style={styles.th}>充值账号</th>
+                <th style={styles.th}>游戏账号</th>
+                <th style={styles.th}>UID</th>
                 <th style={styles.th}>各笔金额</th>
                 <th style={styles.th}>总计</th>
-                <th style={styles.th}>支付宝账号</th>
+                <th style={styles.th}>支付宝</th>
                 <th style={styles.th}>类别</th>
                 <th style={styles.th}>报销</th>
                 <th style={styles.th}>截图</th>
@@ -486,6 +496,7 @@ function Admin() {
                 <tr key={record.id} style={styles.trHover}>
                   <td style={styles.td}>{record.submit_date}</td>
                   <td style={styles.td}>{record.streamer}</td>
+                  <td style={styles.td}>{record.game_account_name || '-'}</td>
                   <td style={styles.td}>{record.account}</td>
                   <td style={styles.td}>
                     <ul style={styles.amountsList}>

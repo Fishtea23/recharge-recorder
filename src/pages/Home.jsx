@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase, streamers, getGameAccountNames, getUidByAccount } from '../utils/supabase'
 
+// 预设充值金额选项
+const PRESET_AMOUNTS = [6, 12, 50, 98, 168, 328, 648]
+
 function Home() {
   const [formData, setFormData] = useState({
     streamer: '',
@@ -8,11 +11,12 @@ function Home() {
     accountUid: '',
     category: '',
     alipayAccount: '',
+    customDate: '',  // 自定义日期（可选）
     isReimbursed: '否',
-    submitDate: new Date().toISOString().split('T')[0]
+    submitDate: new Date().toISOString().split('T')[0]  // 默认今天
   })
   
-  const [images, setImages] = useState([]) // { file, preview, amount, id }
+  const [images, setImages] = useState([]) // { file, preview, amount, amountType, customAmount, id }
   const [totalAmount, setTotalAmount] = useState(0)
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -24,7 +28,9 @@ function Home() {
   // 计算总金额
   useEffect(() => {
     const total = images.reduce((sum, img) => {
-      const amount = parseFloat(img.amount) || 0
+      const amount = img.amountType === 'custom' 
+        ? (parseFloat(img.customAmount) || 0)
+        : (parseFloat(img.amount) || 0)
       return sum + amount
     }, 0)
     setTotalAmount(total)
@@ -38,6 +44,11 @@ function Home() {
       gameAccount: accountName,
       accountUid: uid
     })
+  }
+
+  // 获取实际使用的日期（自定义日期优先，否则用今天）
+  const getSubmitDate = () => {
+    return formData.customDate || formData.submitDate
   }
 
   // 调用 Gemini API 识别金额
@@ -101,6 +112,16 @@ function Home() {
     })
   }
 
+  // 检测金额是否匹配预设选项
+  const matchPresetAmount = (amount) => {
+    if (!amount) return { type: 'preset', value: '' }
+    const numAmount = parseFloat(amount)
+    if (PRESET_AMOUNTS.includes(numAmount)) {
+      return { type: 'preset', value: numAmount.toString() }
+    }
+    return { type: 'custom', value: '', customValue: numAmount.toString() }
+  }
+
   // 处理图片选择
   const handleImageSelect = async (e) => {
     const files = Array.from(e.target.files)
@@ -137,7 +158,9 @@ function Home() {
           file, 
           arrayBuffer,
           preview, 
-          amount: '', 
+          amount: '',
+          amountType: 'preset',
+          customAmount: '',
           loading: true 
         }
         setImages(prev => [...prev, newImage])
@@ -145,12 +168,30 @@ function Home() {
         // 调用 Gemini API 识别
         const recognizedAmount = await recognizeAmount(preview)
         
+        // 匹配预设金额
+        const amountMatch = matchPresetAmount(recognizedAmount)
+        
         // 更新识别结果
-        setImages(prev => prev.map(img => 
-          img.id === id 
-            ? { ...img, amount: recognizedAmount !== null ? recognizedAmount.toString() : '', loading: false }
-            : img
-        ))
+        setImages(prev => prev.map(img => {
+          if (img.id !== id) return img
+          if (amountMatch.type === 'preset') {
+            return { 
+              ...img, 
+              amount: amountMatch.value,
+              amountType: 'preset',
+              customAmount: '',
+              loading: false 
+            }
+          } else {
+            return { 
+              ...img, 
+              amount: '',
+              amountType: 'custom',
+              customAmount: amountMatch.customValue || '',
+              loading: false 
+            }
+          }
+        }))
       }
       previewReader.readAsDataURL(file)
     }
@@ -167,11 +208,33 @@ function Home() {
     setImages(prev => prev.filter(img => img.id !== id))
   }
 
-  // 修改金额
-  const handleAmountChange = (id, value) => {
+  // 修改金额类型
+  const handleAmountTypeChange = (id, type) => {
+    setImages(prev => prev.map(img => 
+      img.id === id ? { ...img, amountType: type, amount: '', customAmount: '' } : img
+    ))
+  }
+
+  // 修改预设金额
+  const handlePresetAmountChange = (id, value) => {
     setImages(prev => prev.map(img => 
       img.id === id ? { ...img, amount: value } : img
     ))
+  }
+
+  // 修改自定义金额
+  const handleCustomAmountChange = (id, value) => {
+    setImages(prev => prev.map(img => 
+      img.id === id ? { ...img, customAmount: value } : img
+    ))
+  }
+
+  // 获取图片的实际金额
+  const getImageAmount = (img) => {
+    if (img.amountType === 'custom') {
+      return parseFloat(img.customAmount) || 0
+    }
+    return parseFloat(img.amount) || 0
   }
 
   // 提交表单
@@ -198,6 +261,15 @@ function Home() {
     if (images.length === 0) {
       setMessage({ type: 'error', text: '请至少上传一张充值截图' })
       return
+    }
+
+    // 验证每张图都有金额
+    for (const img of images) {
+      const amount = getImageAmount(img)
+      if (amount <= 0) {
+        setMessage({ type: 'error', text: '请填写所有图片的充值金额' })
+        return
+      }
     }
 
     setSubmitting(true)
@@ -232,7 +304,7 @@ function Home() {
           .getPublicUrl(filePath)
 
         imageUrls.push(publicUrl)
-        amounts.push(parseFloat(img.amount) || 0)
+        amounts.push(getImageAmount(img))
       }
 
       // 2. 保存记录到数据库
@@ -240,15 +312,15 @@ function Home() {
         .from('recharge_records')
         .insert([{
           streamer: formData.streamer,
-          account: formData.accountUid,  // 存入UID
-          game_account_name: formData.gameAccount,  // 同时存入游戏账号名称
+          account: formData.accountUid,
+          game_account_name: formData.gameAccount,
           category: formData.category,
           alipay_account: formData.alipayAccount,
           amounts: amounts,
           total_amount: totalAmount,
           image_urls: imageUrls,
           is_reimbursed: formData.isReimbursed === '是',
-          submit_date: formData.submitDate
+          submit_date: getSubmitDate()
         }])
 
       if (insertError) {
@@ -262,6 +334,7 @@ function Home() {
         accountUid: '',
         category: '',
         alipayAccount: '',
+        customDate: '',
         isReimbursed: '否',
         submitDate: new Date().toISOString().split('T')[0]
       })
@@ -349,6 +422,11 @@ function Home() {
       borderRadius: '6px',
       border: '1px solid #91caff'
     },
+    dateHint: {
+      marginTop: '6px',
+      fontSize: '12px',
+      color: '#888'
+    },
     radioGroup: {
       display: 'flex',
       gap: '20px'
@@ -377,7 +455,7 @@ function Home() {
     },
     imageGrid: {
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
       gap: '12px',
       marginTop: '16px'
     },
@@ -390,13 +468,29 @@ function Home() {
     },
     imagePreview: {
       width: '100%',
-      height: '120px',
+      height: '100px',
       objectFit: 'cover'
     },
     imageInfo: {
-      padding: '8px'
+      padding: '10px'
     },
-    amountInput: {
+    amountTypeSelect: {
+      width: '100%',
+      padding: '6px',
+      fontSize: '13px',
+      border: '1px solid #ddd',
+      borderRadius: '4px',
+      marginBottom: '6px'
+    },
+    presetSelect: {
+      width: '100%',
+      padding: '8px',
+      fontSize: '14px',
+      border: '1px solid #ddd',
+      borderRadius: '4px',
+      textAlign: 'center'
+    },
+    customInput: {
       width: '100%',
       padding: '8px',
       fontSize: '14px',
@@ -569,6 +663,20 @@ function Home() {
           />
         </div>
 
+        {/* 充值日期 */}
+        <div style={styles.formGroup}>
+          <label style={styles.label}>充值日期 *</label>
+          <input
+            type="date"
+            style={styles.input}
+            value={formData.customDate || formData.submitDate}
+            onChange={(e) => setFormData({ ...formData, customDate: e.target.value })}
+          />
+          <div style={styles.dateHint}>
+            默认今天 ({formData.submitDate})，可选择其他日期
+          </div>
+        </div>
+
         {/* 上传截图 */}
         <div style={styles.formGroup}>
           <label style={styles.label}>充值截图 *</label>
@@ -612,13 +720,40 @@ function Home() {
                     style={styles.imagePreview}
                   />
                   <div style={styles.imageInfo}>
-                    <input
-                      type="number"
-                      style={styles.amountInput}
-                      placeholder="金额"
-                      value={img.amount}
-                      onChange={(e) => handleAmountChange(img.id, e.target.value)}
-                    />
+                    {/* 金额类型选择 */}
+                    <select
+                      style={styles.amountTypeSelect}
+                      value={img.amountType}
+                      onChange={(e) => handleAmountTypeChange(img.id, e.target.value)}
+                    >
+                      <option value="preset">选择金额</option>
+                      <option value="custom">手动输入</option>
+                    </select>
+                    
+                    {/* 预设金额下拉 */}
+                    {img.amountType === 'preset' && (
+                      <select
+                        style={styles.presetSelect}
+                        value={img.amount}
+                        onChange={(e) => handlePresetAmountChange(img.id, e.target.value)}
+                      >
+                        <option value="">选择金额</option>
+                        {PRESET_AMOUNTS.map(amt => (
+                          <option key={amt} value={amt}>¥{amt}</option>
+                        ))}
+                      </select>
+                    )}
+                    
+                    {/* 自定义金额输入 */}
+                    {img.amountType === 'custom' && (
+                      <input
+                        type="number"
+                        style={styles.customInput}
+                        placeholder="输入金额"
+                        value={img.customAmount}
+                        onChange={(e) => handleCustomAmountChange(img.id, e.target.value)}
+                      />
+                    )}
                   </div>
                 </div>
               ))}
@@ -657,17 +792,6 @@ function Home() {
               是
             </label>
           </div>
-        </div>
-
-        {/* 提交日期 */}
-        <div style={styles.formGroup}>
-          <label style={styles.label}>提交日期</label>
-          <input
-            type="text"
-            style={styles.inputReadonly}
-            value={formData.submitDate}
-            readOnly
-          />
         </div>
 
         {/* 提交按钮 */}
