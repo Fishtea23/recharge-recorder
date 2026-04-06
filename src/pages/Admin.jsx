@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { supabase } from '../utils/supabase'
+import { getRecords, deleteRecord } from '../utils/api'
 import ExcelJS from 'exceljs'
 import { saveAs } from 'file-saver'
 
@@ -7,21 +7,16 @@ function Admin() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [password, setPassword] = useState('')
   const [loginError, setLoginError] = useState('')
-  
   const [records, setRecords] = useState([])
   const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
-  const [filters, setFilters] = useState({
-    date: '',
-    streamer: ''
-  })
+  const [deletingId, setDeletingId] = useState(null)
+  const [filters, setFilters] = useState({ date: '', streamer: '' })
   const [selectedImages, setSelectedImages] = useState(null)
   const [viewingRecord, setViewingRecord] = useState(null)
-  const [deletingRecord, setDeletingRecord] = useState(null)
 
   const ADMIN_PASSWORD = 'Fishtea2332'
 
-  // 登录
   const handleLogin = (e) => {
     e.preventDefault()
     if (password === ADMIN_PASSWORD) {
@@ -33,30 +28,10 @@ function Admin() {
     }
   }
 
-  // 加载记录
   const loadRecords = async () => {
     setLoading(true)
     try {
-      let query = supabase
-        .from('recharge_records')
-        .select('*')
-        .order('submit_date', { ascending: false })
-        .order('created_at', { ascending: false })
-
-      if (filters.date) {
-        query = query.eq('submit_date', filters.date)
-      }
-
-      if (filters.streamer) {
-        query = query.ilike('streamer', `%${filters.streamer}%`)
-      }
-
-      const { data, error } = await query
-
-      if (error) {
-        throw error
-      }
-
+      const data = await getRecords(filters)
       setRecords(data || [])
     } catch (error) {
       console.error('加载记录失败:', error)
@@ -66,19 +41,24 @@ function Admin() {
     }
   }
 
-  // 下载图片为 ArrayBuffer
-  const downloadImage = async (url) => {
+  const handleDelete = async (record) => {
+    if (!confirm(`确定要删除这条记录吗？\n\n主播：${record.streamer}\n日期：${record.submit_date}\n金额：¥${record.total_amount}`)) {
+      return
+    }
+
+    setDeletingId(record.id)
     try {
-      const response = await fetch(url)
-      if (!response.ok) throw new Error('下载失败')
-      return await response.arrayBuffer()
+      await deleteRecord(record.id)
+      await loadRecords()
+      alert('删除成功！')
     } catch (error) {
-      console.error('下载图片失败:', error)
-      return null
+      console.error('删除失败:', error)
+      alert('删除失败: ' + error.message)
+    } finally {
+      setDeletingId(null)
     }
   }
 
-  // 导出 Excel（带图片嵌入）
   const exportToExcel = async () => {
     if (records.length === 0) {
       alert('没有数据可导出')
@@ -86,12 +66,10 @@ function Admin() {
     }
 
     setExporting(true)
-
     try {
       const workbook = new ExcelJS.Workbook()
       const worksheet = workbook.addWorksheet('充值记录')
 
-      // 设置列宽
       worksheet.columns = [
         { header: '提交日期', key: 'date', width: 12 },
         { header: '主播姓名', key: 'streamer', width: 12 },
@@ -105,88 +83,35 @@ function Admin() {
         { header: '截图链接', key: 'imageLinks', width: 60 }
       ]
 
-      // 添加数据行
-      const rowsData = records.map(record => ({
-        date: record.submit_date,
-        streamer: record.streamer,
-        gameAccount: record.game_account_name || '',
-        uid: record.account,
-        amounts: (record.amounts || []).map((amount, index) => 
-          `第${index + 1}笔: ¥${amount}`
-        ).join(', '),
-        total: record.total_amount,
-        alipay: record.alipay_account,
-        category: record.category,
-        reimbursed: record.is_reimbursed ? '是' : '否',
-        imageLinks: (record.image_urls || []).join('\n'),
-        imageUrls: record.image_urls || []
-      }))
+      for (const record of records) {
+        const amountsText = (record.amounts || []).map((amount, index) => `第${index + 1}笔: ¥${amount}`).join(', ')
+        const imageLinks = (record.image_urls || []).join('\n')
 
-      // 添加每一行，并设置行高
-      for (let i = 0; i < rowsData.length; i++) {
-        const rowData = rowsData[i]
-        const imageCount = rowData.imageUrls.length
-        // 根据图片数量设置行高（每张图片占 60 像素）
-        const rowHeight = Math.max(20, imageCount * 60)
-        
-        const row = worksheet.addRow({
-          date: rowData.date,
-          streamer: rowData.streamer,
-          gameAccount: rowData.gameAccount,
-          uid: rowData.uid,
-          amounts: rowData.amounts,
-          total: rowData.total,
-          alipay: rowData.alipay,
-          category: rowData.category,
-          reimbursed: rowData.reimbursed,
-          imageLinks: rowData.imageLinks
+        worksheet.addRow({
+          date: record.submit_date,
+          streamer: record.streamer,
+          gameAccount: record.game_account_name || '',
+          uid: record.account,
+          amounts: amountsText,
+          total: record.total_amount,
+          alipay: record.alipay_account,
+          category: record.category,
+          reimbursed: record.is_reimbursed ? '是' : '否',
+          imageLinks: imageLinks
         })
-        
-        row.height = rowHeight
-
-        // 为每个图片添加超链接
-        if (rowData.imageUrls.length > 0) {
-          const linkCell = row.getCell(10) // 截图链接列
-          // 使用公式创建超链接
-          const hyperlinks = rowData.imageUrls.map((url, idx) => {
-            return `HYPERLINK("${url}","[图${idx + 1}]")`
-          }).join(' & " " & ')
-          
-          linkCell.value = {
-            formula: `=${hyperlinks}`,
-            result: rowData.imageUrls.map((_, idx) => `[图${idx + 1}]`).join(' ')
-          }
-          linkCell.style = {
-            font: { color: { argb: 'FF1890FF' }, underline: true }
-          }
-        }
       }
 
-      // 设置表头样式
       worksheet.getRow(1).eachCell(cell => {
         cell.font = { bold: true, size: 11 }
-        cell.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: 'FFE6F7FF' }
-        }
-        cell.border = {
-          bottom: { style: 'thin', color: { argb: 'FF1890FF' } }
-        }
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F7FF' } }
+        cell.border = { bottom: { style: 'thin', color: { argb: 'FF1890FF' } } }
       })
 
-      // 冻结首行
-      worksheet.views = [
-        { state: 'frozen', xSplit: 0, ySplit: 1 }
-      ]
+      worksheet.views = [{ state: 'frozen', xSplit: 0, ySplit: 1 }]
 
-      // 导出文件
       const buffer = await workbook.xlsx.writeBuffer()
-      const blob = new Blob([buffer], { 
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
-      })
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
       saveAs(blob, `充值记录_${new Date().toISOString().split('T')[0]}.xlsx`)
-
     } catch (error) {
       console.error('导出失败:', error)
       alert('导出失败: ' + error.message)
@@ -195,354 +120,62 @@ function Admin() {
     }
   }
 
-  // 查看图片
   const viewImages = (record) => {
     setViewingRecord(record)
     setSelectedImages(record.image_urls || [])
   }
 
-  // 关闭图片查看
   const closeImageViewer = () => {
     setSelectedImages(null)
     setViewingRecord(null)
   }
 
-  // 删除记录
-  const deleteRecord = async (record) => {
-    if (!confirm(`确定要删除这条记录吗？\n\n主播：${record.streamer}\n日期：${record.submit_date}\n金额：¥${record.total_amount}`)) {
-      return
-    }
-
-    setDeletingRecord(record.id)
-    try {
-      // 1. 删除存储桶中的图片
-      if (record.image_urls && record.image_urls.length > 0) {
-        for (const url of record.image_urls) {
-          try {
-            // 从 URL 中提取文件路径
-            const urlObj = new URL(url)
-            const pathMatch = urlObj.pathname.match(/\/recharge-images\/(.*)/)
-            if (pathMatch) {
-              const filePath = pathMatch[1]
-              await supabase.storage
-                .from('recharge-images')
-                .remove([filePath])
-            }
-          } catch (e) {
-            console.error('删除图片失败:', e)
-            // 继续删除其他图片，不中断流程
-          }
-        }
-      }
-
-      // 2. 删除数据库记录
-      const { error } = await supabase
-        .from('recharge_records')
-        .delete()
-        .eq('id', record.id)
-
-      if (error) {
-        throw error
-      }
-
-      // 3. 刷新列表
-      await loadRecords()
-      alert('删除成功！')
-
-    } catch (error) {
-      console.error('删除失败:', error)
-      alert('删除失败: ' + error.message)
-    } finally {
-      setDeletingRecord(null)
-    }
-  }
-
-  // 获取所有主播（用于筛选）
   const uniqueStreamers = [...new Set(records.map(r => r.streamer))]
 
   const styles = {
-    container: {
-      maxWidth: '1400px',
-      margin: '0 auto',
-      padding: '20px'
-    },
-    header: {
-      marginBottom: '20px'
-    },
-    title: {
-      fontSize: '24px',
-      fontWeight: 'bold',
-      marginBottom: '10px'
-    },
-    loginBox: {
-      maxWidth: '400px',
-      margin: '100px auto',
-      padding: '30px',
-      backgroundColor: 'white',
-      borderRadius: '12px',
-      boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
-    },
-    loginTitle: {
-      textAlign: 'center',
-      fontSize: '20px',
-      marginBottom: '20px'
-    },
-    input: {
-      width: '100%',
-      padding: '12px',
-      fontSize: '16px',
-      border: '1px solid #ddd',
-      borderRadius: '8px',
-      marginBottom: '16px',
-      outline: 'none'
-    },
-    button: {
-      width: '100%',
-      padding: '12px',
-      fontSize: '16px',
-      fontWeight: 'bold',
-      color: 'white',
-      backgroundColor: '#1890ff',
-      border: 'none',
-      borderRadius: '8px',
-      cursor: 'pointer'
-    },
-    error: {
-      color: '#ff4d4f',
-      textAlign: 'center',
-      marginBottom: '10px',
-      fontSize: '14px'
-    },
-    toolbar: {
-      display: 'flex',
-      flexWrap: 'wrap',
-      gap: '12px',
-      alignItems: 'center',
-      marginBottom: '20px',
-      padding: '16px',
-      backgroundColor: 'white',
-      borderRadius: '8px',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-    },
-    filterGroup: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px'
-    },
-    filterLabel: {
-      fontSize: '14px',
-      color: '#666'
-    },
-    filterInput: {
-      padding: '8px 12px',
-      fontSize: '14px',
-      border: '1px solid #ddd',
-      borderRadius: '6px',
-      outline: 'none'
-    },
-    filterSelect: {
-      padding: '8px 12px',
-      fontSize: '14px',
-      border: '1px solid #ddd',
-      borderRadius: '6px',
-      outline: 'none',
-      backgroundColor: 'white'
-    },
-    actionBtn: {
-      padding: '8px 16px',
-      fontSize: '14px',
-      border: 'none',
-      borderRadius: '6px',
-      cursor: 'pointer',
-      backgroundColor: '#1890ff',
-      color: 'white'
-    },
-    exportBtn: {
-      padding: '8px 16px',
-      fontSize: '14px',
-      border: 'none',
-      borderRadius: '6px',
-      cursor: 'pointer',
-      backgroundColor: '#52c41a',
-      color: 'white'
-    },
-    exportBtnDisabled: {
-      backgroundColor: '#ccc',
-      cursor: 'not-allowed'
-    },
-    logoutBtn: {
-      padding: '8px 16px',
-      fontSize: '14px',
-      border: '1px solid #ff4d4f',
-      borderRadius: '6px',
-      cursor: 'pointer',
-      backgroundColor: 'white',
-      color: '#ff4d4f',
-      marginLeft: 'auto'
-    },
-    tableContainer: {
-      overflowX: 'auto',
-      backgroundColor: 'white',
-      borderRadius: '8px',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-    },
-    table: {
-      width: '100%',
-      borderCollapse: 'collapse',
-      fontSize: '14px'
-    },
-    th: {
-      padding: '12px',
-      textAlign: 'left',
-      backgroundColor: '#fafafa',
-      borderBottom: '2px solid #eee',
-      fontWeight: '600',
-      whiteSpace: 'nowrap'
-    },
-    td: {
-      padding: '12px',
-      borderBottom: '1px solid #eee',
-      verticalAlign: 'top'
-    },
-    trHover: {
-      ':hover': {
-        backgroundColor: '#f5f5f5'
-      }
-    },
-    amountsList: {
-      margin: 0,
-      paddingLeft: '16px',
-      fontSize: '13px'
-    },
-    amountItem: {
-      marginBottom: '2px'
-    },
-    totalCell: {
-      fontWeight: 'bold',
-      color: '#1890ff'
-    },
-    imageBtn: {
-      padding: '4px 10px',
-      fontSize: '12px',
-      border: 'none',
-      borderRadius: '4px',
-      cursor: 'pointer',
-      backgroundColor: '#722ed1',
-      color: 'white'
-    },
-    deleteBtn: {
-      padding: '4px 10px',
-      fontSize: '12px',
-      border: 'none',
-      borderRadius: '4px',
-      cursor: 'pointer',
-      backgroundColor: '#ff4d4f',
-      color: 'white'
-    },
-    deleteBtnDisabled: {
-      backgroundColor: '#ffccc7',
-      cursor: 'not-allowed'
-    },
-    badge: {
-      display: 'inline-block',
-      padding: '2px 8px',
-      borderRadius: '4px',
-      fontSize: '12px',
-      fontWeight: '500'
-    },
-    badgeYes: {
-      backgroundColor: '#f6ffed',
-      color: '#52c41a',
-      border: '1px solid #b7eb8f'
-    },
-    badgeNo: {
-      backgroundColor: '#f5f5f5',
-      color: '#999',
-      border: '1px solid #d9d9d9'
-    },
-    emptyState: {
-      textAlign: 'center',
-      padding: '60px 20px',
-      color: '#999'
-    },
-    modal: {
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: 'rgba(0,0,0,0.8)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-      padding: '20px'
-    },
-    modalContent: {
-      backgroundColor: 'white',
-      borderRadius: '12px',
-      maxWidth: '90vw',
-      maxHeight: '90vh',
-      overflow: 'auto',
-      padding: '20px',
-      position: 'relative'
-    },
-    modalHeader: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: '16px',
-      paddingBottom: '12px',
-      borderBottom: '1px solid #eee'
-    },
-    modalTitle: {
-      fontSize: '18px',
-      fontWeight: 'bold'
-    },
-    closeBtn: {
-      width: '32px',
-      height: '32px',
-      borderRadius: '50%',
-      border: 'none',
-      backgroundColor: '#f5f5f5',
-      cursor: 'pointer',
-      fontSize: '18px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center'
-    },
-    imageGrid: {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
-      gap: '16px'
-    },
-    imageContainer: {
-      border: '1px solid #eee',
-      borderRadius: '8px',
-      overflow: 'hidden'
-    },
-    screenshot: {
-      width: '100%',
-      height: 'auto',
-      display: 'block'
-    },
-    imageCaption: {
-      padding: '8px',
-      textAlign: 'center',
-      fontSize: '13px',
-      color: '#666',
-      backgroundColor: '#fafafa'
-    },
-    backLink: {
-      display: 'inline-block',
-      marginTop: '20px',
-      color: '#1890ff',
-      textDecoration: 'none',
-      fontSize: '14px'
-    }
+    container: { maxWidth: '1400px', margin: '0 auto', padding: '20px' },
+    header: { marginBottom: '20px' },
+    title: { fontSize: '24px', fontWeight: 'bold', marginBottom: '10px' },
+    loginBox: { maxWidth: '400px', margin: '100px auto', padding: '30px', backgroundColor: 'white', borderRadius: '12px', boxShadow: '0 2px 10px rgba(0,0,0,0.1)' },
+    loginTitle: { textAlign: 'center', fontSize: '20px', marginBottom: '20px' },
+    input: { width: '100%', padding: '12px', fontSize: '16px', border: '1px solid #ddd', borderRadius: '8px', marginBottom: '16px', outline: 'none' },
+    button: { width: '100%', padding: '12px', fontSize: '16px', fontWeight: 'bold', color: 'white', backgroundColor: '#1890ff', border: 'none', borderRadius: '8px', cursor: 'pointer' },
+    error: { color: '#ff4d4f', textAlign: 'center', marginBottom: '10px', fontSize: '14px' },
+    toolbar: { display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', marginBottom: '20px', padding: '16px', backgroundColor: 'white', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' },
+    filterGroup: { display: 'flex', alignItems: 'center', gap: '8px' },
+    filterLabel: { fontSize: '14px', color: '#666' },
+    filterInput: { padding: '8px 12px', fontSize: '14px', border: '1px solid #ddd', borderRadius: '6px', outline: 'none' },
+    filterSelect: { padding: '8px 12px', fontSize: '14px', border: '1px solid #ddd', borderRadius: '6px', outline: 'none', backgroundColor: 'white' },
+    actionBtn: { padding: '8px 16px', fontSize: '14px', border: 'none', borderRadius: '6px', cursor: 'pointer', backgroundColor: '#1890ff', color: 'white' },
+    exportBtn: { padding: '8px 16px', fontSize: '14px', border: 'none', borderRadius: '6px', cursor: 'pointer', backgroundColor: '#52c41a', color: 'white' },
+    exportBtnDisabled: { backgroundColor: '#ccc', cursor: 'not-allowed' },
+    logoutBtn: { padding: '8px 16px', fontSize: '14px', border: '1px solid #ff4d4f', borderRadius: '6px', cursor: 'pointer', backgroundColor: 'white', color: '#ff4d4f', marginLeft: 'auto' },
+    tableContainer: { overflowX: 'auto', backgroundColor: 'white', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' },
+    table: { width: '100%', borderCollapse: 'collapse', fontSize: '14px' },
+    th: { padding: '12px', textAlign: 'left', backgroundColor: '#fafafa', borderBottom: '2px solid #eee', fontWeight: '600', whiteSpace: 'nowrap' },
+    td: { padding: '12px', borderBottom: '1px solid #eee', verticalAlign: 'top' },
+    amountsList: { margin: 0, paddingLeft: '16px', fontSize: '13px' },
+    amountItem: { marginBottom: '2px' },
+    totalCell: { fontWeight: 'bold', color: '#1890ff' },
+    imageBtn: { padding: '4px 10px', fontSize: '12px', border: 'none', borderRadius: '4px', cursor: 'pointer', backgroundColor: '#722ed1', color: 'white' },
+    deleteBtn: { padding: '4px 10px', fontSize: '12px', border: 'none', borderRadius: '4px', cursor: 'pointer', backgroundColor: '#ff4d4f', color: 'white' },
+    deleteBtnDisabled: { backgroundColor: '#ffccc7', cursor: 'not-allowed' },
+    badge: { display: 'inline-block', padding: '2px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '500' },
+    badgeYes: { backgroundColor: '#f6ffed', color: '#52c41a', border: '1px solid #b7eb8f' },
+    badgeNo: { backgroundColor: '#f5f5f5', color: '#999', border: '1px solid #d9d9d9' },
+    emptyState: { textAlign: 'center', padding: '60px 20px', color: '#999' },
+    modal: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' },
+    modalContent: { backgroundColor: 'white', borderRadius: '12px', maxWidth: '90vw', maxHeight: '90vh', overflow: 'auto', padding: '20px', position: 'relative' },
+    modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #eee' },
+    modalTitle: { fontSize: '18px', fontWeight: 'bold' },
+    closeBtn: { width: '32px', height: '32px', borderRadius: '50%', border: 'none', backgroundColor: '#f5f5f5', cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+    imageGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '16px' },
+    imageContainer: { border: '1px solid #eee', borderRadius: '8px', overflow: 'hidden' },
+    screenshot: { width: '100%', height: 'auto', display: 'block' },
+    imageCaption: { padding: '8px', textAlign: 'center', fontSize: '13px', color: '#666', backgroundColor: '#fafafa' },
+    backLink: { display: 'inline-block', marginTop: '20px', color: '#1890ff', textDecoration: 'none', fontSize: '14px' }
   }
 
-  // 登录页面
   if (!isAuthenticated) {
     return (
       <div style={styles.container}>
@@ -550,13 +183,7 @@ function Admin() {
           <h2 style={styles.loginTitle}>🔐 管理员登录</h2>
           {loginError && <p style={styles.error}>{loginError}</p>}
           <form onSubmit={handleLogin}>
-            <input
-              type="password"
-              style={styles.input}
-              placeholder="请输入密码"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
+            <input type="password" style={styles.input} placeholder="请输入密码" value={password} onChange={(e) => setPassword(e.target.value)} />
             <button type="submit" style={styles.button}>登录</button>
           </form>
         </div>
@@ -573,57 +200,32 @@ function Admin() {
         <h1 style={styles.title}>📊 充值记录管理</h1>
       </div>
 
-      {/* 工具栏 */}
       <div style={styles.toolbar}>
         <div style={styles.filterGroup}>
           <label style={styles.filterLabel}>日期筛选:</label>
-          <input
-            type="date"
-            style={styles.filterInput}
-            value={filters.date}
-            onChange={(e) => setFilters({ ...filters, date: e.target.value })}
-          />
+          <input type="date" style={styles.filterInput} value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} />
         </div>
         
         <div style={styles.filterGroup}>
           <label style={styles.filterLabel}>主播:</label>
-          <select
-            style={styles.filterSelect}
-            value={filters.streamer}
-            onChange={(e) => setFilters({ ...filters, streamer: e.target.value })}
-          >
+          <select style={styles.filterSelect} value={filters.streamer} onChange={(e) => setFilters({ ...filters, streamer: e.target.value })}>
             <option value="">全部主播</option>
-            {uniqueStreamers.map(s => (
-              <option key={s} value={s}>{s}</option>
-            ))}
+            {uniqueStreamers.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
 
-        <button style={styles.actionBtn} onClick={loadRecords}>
-          🔄 刷新
-        </button>
-        
-        <button 
-          style={{...styles.exportBtn, ...(exporting ? styles.exportBtnDisabled : {})}} 
-          onClick={exportToExcel}
-          disabled={exporting}
-        >
+        <button style={styles.actionBtn} onClick={loadRecords}>🔄 刷新</button>
+        <button style={{...styles.exportBtn, ...(exporting ? styles.exportBtnDisabled : {})}} onClick={exportToExcel} disabled={exporting}>
           {exporting ? '导出中...' : '📥 导出 Excel'}
         </button>
-        
-        <button style={styles.logoutBtn} onClick={() => setIsAuthenticated(false)}>
-          退出登录
-        </button>
+        <button style={styles.logoutBtn} onClick={() => setIsAuthenticated(false)}>退出登录</button>
       </div>
 
-      {/* 数据表格 */}
       <div style={styles.tableContainer}>
         {loading ? (
           <div style={styles.emptyState}>加载中...</div>
         ) : records.length === 0 ? (
-          <div style={styles.emptyState}>
-            <p>暂无数据</p>
-          </div>
+          <div style={styles.emptyState}><p>暂无数据</p></div>
         ) : (
           <table style={styles.table}>
             <thead>
@@ -643,50 +245,32 @@ function Admin() {
             </thead>
             <tbody>
               {records.map(record => (
-                <tr key={record.id} style={styles.trHover}>
+                <tr key={record.id}>
                   <td style={styles.td}>{record.submit_date}</td>
                   <td style={styles.td}>{record.streamer}</td>
                   <td style={styles.td}>{record.game_account_name || '-'}</td>
                   <td style={styles.td}>{record.account}</td>
                   <td style={styles.td}>
                     <ul style={styles.amountsList}>
-                      {(record.amounts || []).map((amount, idx) => (
-                        <li key={idx} style={styles.amountItem}>
-                          第{idx + 1}笔: ¥{amount}
-                        </li>
-                      ))}
+                      {(record.amounts || []).map((amount, idx) => <li key={idx}>第{idx + 1}笔: ¥{amount}</li>)}
                     </ul>
                   </td>
-                  <td style={{ ...styles.td, ...styles.totalCell }}>
-                    ¥{record.total_amount}
-                  </td>
+                  <td style={{...styles.td, ...styles.totalCell}}>¥{record.total_amount}</td>
                   <td style={styles.td}>{record.alipay_account}</td>
                   <td style={styles.td}>{record.category}</td>
                   <td style={styles.td}>
-                    <span style={{
-                      ...styles.badge,
-                      ...(record.is_reimbursed ? styles.badgeYes : styles.badgeNo)
-                    }}>
+                    <span style={{...styles.badge, ...(record.is_reimbursed ? styles.badgeYes : styles.badgeNo)}}>
                       {record.is_reimbursed ? '是' : '否'}
                     </span>
                   </td>
                   <td style={styles.td}>
                     {(record.image_urls || []).length > 0 && (
-                      <button
-                        style={styles.imageBtn}
-                        onClick={() => viewImages(record)}
-                      >
-                        查看 ({record.image_urls.length}张)
-                      </button>
+                      <button style={styles.imageBtn} onClick={() => viewImages(record)}>查看 ({record.image_urls.length}张)</button>
                     )}
                   </td>
                   <td style={styles.td}>
-                    <button
-                      style={{...styles.deleteBtn, ...(deletingRecord === record.id ? styles.deleteBtnDisabled : {})}}
-                      onClick={() => deleteRecord(record)}
-                      disabled={deletingRecord === record.id}
-                    >
-                      {deletingRecord === record.id ? '删除中...' : '删除'}
+                    <button style={{...styles.deleteBtn, ...(deletingId === record.id ? styles.deleteBtnDisabled : {})}} onClick={() => handleDelete(record)} disabled={deletingId === record.id}>
+                      {deletingId === record.id ? '删除中...' : '删除'}
                     </button>
                   </td>
                 </tr>
@@ -696,32 +280,20 @@ function Admin() {
         )}
       </div>
 
-      <div>
-        <a href="/" style={styles.backLink}>← 返回提交页面</a>
-      </div>
+      <div><a href="/" style={styles.backLink}>← 返回提交页面</a></div>
 
-      {/* 图片查看弹窗 */}
       {selectedImages && (
         <div style={styles.modal} onClick={closeImageViewer}>
           <div style={styles.modalContent} onClick={e => e.stopPropagation()}>
             <div style={styles.modalHeader}>
-              <h3 style={styles.modalTitle}>
-                截图查看 - {viewingRecord?.streamer} ({viewingRecord?.submit_date})
-              </h3>
+              <h3 style={styles.modalTitle}>截图查看 - {viewingRecord?.streamer} ({viewingRecord?.submit_date})</h3>
               <button style={styles.closeBtn} onClick={closeImageViewer}>×</button>
             </div>
             <div style={styles.imageGrid}>
               {selectedImages.map((url, idx) => (
                 <div key={idx} style={styles.imageContainer}>
-                  <img
-                    src={url}
-                    alt={`截图 ${idx + 1}`}
-                    style={styles.screenshot}
-                    onClick={() => window.open(url, '_blank')}
-                  />
-                  <div style={styles.imageCaption}>
-                    第 {idx + 1} 张 - ¥{viewingRecord?.amounts?.[idx] || '未知'}
-                  </div>
+                  <img src={url} alt={`截图 ${idx + 1}`} style={styles.screenshot} onClick={() => window.open(url, '_blank')} />
+                  <div style={styles.imageCaption}>第 {idx + 1} 张 - ¥{viewingRecord?.amounts?.[idx] || '未知'}</div>
                 </div>
               ))}
             </div>
