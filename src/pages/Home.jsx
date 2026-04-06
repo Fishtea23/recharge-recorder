@@ -785,19 +785,66 @@ function Home() {
               <label style={styles.label}>充值截图 *</label>
               <div
                 style={styles.uploadArea}
-                onClick={() => fileInputRefs.current[entry.id]?.click()}
+                onClick={() => fileInputRefs.current[`${entry.id}-camera`]?.click()}
               >
                 <div style={styles.uploadText}>
                   📷 点击上传截图<br />
                   <small>支持手机拍照/相册</small>
                 </div>
               </div>
+              {/* 拍照按钮 */}
+              <button
+                type="button"
+                style={{
+                  width: '48%',
+                  padding: '12px',
+                  fontSize: '14px',
+                  backgroundColor: '#f0f9ff',
+                  border: '2px dashed #91caff',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  marginBottom: '8px'
+                }}
+                onClick={() => fileInputRefs.current[`${entry.id}-camera`]?.click()}
+              >
+                📷 拍照上传
+              </button>
+              
+              {/* 相册按钮 */}
+              <button
+                type="button"
+                style={{
+                  width: '48%',
+                  padding: '12px',
+                  fontSize: '14px',
+                  backgroundColor: '#f6ffed',
+                  border: '2px dashed #b7eb8f',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  marginBottom: '8px',
+                  marginLeft: '4%'
+                }}
+                onClick={() => fileInputRefs.current[`${entry.id}-gallery`]?.click()}
+              >
+                🖼️ 相册选图
+              </button>
+
+              {/* 拍照 input */}
               <input
-                ref={el => fileInputRefs.current[entry.id] = el}
+                ref={el => fileInputRefs.current[`${entry.id}-camera`] = el}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                style={styles.hiddenInput}
+                onChange={(e) => handleEntryImageSelect(entry.id, e)}
+              />
+              
+              {/* 相册 input */}
+              <input
+                ref={el => fileInputRefs.current[`${entry.id}-gallery`] = el}
                 type="file"
                 accept="image/*"
                 multiple
-                capture="environment"
                 style={styles.hiddenInput}
                 onChange={(e) => handleEntryImageSelect(entry.id, e)}
               />
