@@ -194,7 +194,10 @@ function Home() {
 
         const { error: uploadError } = await supabase.storage
           .from('recharge-images')
-          .upload(filePath, img.file)
+          .upload(filePath, img.file, {
+            contentType: img.file.type || 'image/jpeg',
+            upsert: false
+          })
 
         if (uploadError) {
           throw new Error(`图片上传失败: ${uploadError.message}`)
