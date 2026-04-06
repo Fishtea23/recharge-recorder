@@ -91,6 +91,16 @@ function Home() {
     }
   }
 
+  // 文件转 ArrayBuffer
+  const fileToArrayBuffer = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = (e) => resolve(e.target.result)
+      reader.onerror = (e) => reject(e)
+      reader.readAsArrayBuffer(file)
+    })
+  }
+
   // 处理图片选择
   const handleImageSelect = async (e) => {
     const files = Array.from(e.target.files)
@@ -112,13 +122,24 @@ function Home() {
         continue
       }
 
-      const reader = new FileReader()
-      reader.onload = async (event) => {
+      // 生成预览图
+      const previewReader = new FileReader()
+      previewReader.onload = async (event) => {
         const preview = event.target.result
         const id = Date.now() + Math.random().toString(36).substr(2, 9)
         
+        // 存储 file 和 arrayBuffer
+        const arrayBuffer = await fileToArrayBuffer(file)
+        
         // 先添加图片到列表，显示加载状态
-        const newImage = { id, file, preview, amount: '', loading: true }
+        const newImage = { 
+          id, 
+          file, 
+          arrayBuffer,
+          preview, 
+          amount: '', 
+          loading: true 
+        }
         setImages(prev => [...prev, newImage])
 
         // 调用 Gemini API 识别
@@ -131,7 +152,7 @@ function Home() {
             : img
         ))
       }
-      reader.readAsDataURL(file)
+      previewReader.readAsDataURL(file)
     }
 
     setLoading(false)
@@ -188,13 +209,15 @@ function Home() {
       const amounts = []
 
       for (const img of images) {
-        const fileExt = img.file.name.split('.').pop()
+        const fileExt = img.file.name.split('.').pop() || 'jpg'
         const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`
         const filePath = `recharge-screenshots/${fileName}`
 
+        // 使用 ArrayBuffer 上传，避免 Chrome 的 Headers 问题
         const { error: uploadError } = await supabase.storage
           .from('recharge-images')
-          .upload(filePath, img.file, {
+          .upload(filePath, img.arrayBuffer, {
+            contentType: img.file.type || 'image/jpeg',
             cacheControl: '3600',
             upsert: false
           })
