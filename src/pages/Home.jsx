@@ -163,9 +163,17 @@ function Home() {
           return { ...entry, images: updatedImages }
         }))
 
-        // AI 识别
-        const recognizedAmount = await recognizeAmount(preview)
+        // AI 识别金额和日期
+        const { amount: recognizedAmount, date: recognizedDate } = await recognizeImageInfo(preview)
         const amountMatch = matchPresetAmount(recognizedAmount)
+        
+        // 如果有识别到日期，更新条目的日期
+        if (recognizedDate) {
+          setEntries(prev => prev.map(en => {
+            if (en.id !== entryId) return en
+            return { ...en, rechargeDate: recognizedDate }
+          }))
+        }
 
         setEntries(prev => prev.map(entry => {
           if (entry.id !== entryId) return entry
