@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { supabase, getStreamers, getAccountsByStreamer } from '../utils/supabase'
+import { supabase, streamers } from '../utils/supabase'
 
 function Home() {
   const [formData, setFormData] = useState({
@@ -17,9 +17,6 @@ function Home() {
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState({ type: '', text: '' })
   const fileInputRef = useRef(null)
-
-  const streamers = getStreamers()
-  const accounts = formData.streamer ? getAccountsByStreamer(formData.streamer) : []
 
   // 计算总金额
   useEffect(() => {
@@ -152,8 +149,8 @@ function Home() {
       setMessage({ type: 'error', text: '请选择主播姓名' })
       return
     }
-    if (!formData.account) {
-      setMessage({ type: 'error', text: '请选择充值账号' })
+    if (!formData.account.trim()) {
+      setMessage({ type: 'error', text: '请填写充值账号UID' })
       return
     }
     if (!formData.category) {
@@ -458,11 +455,7 @@ function Home() {
           <select
             style={styles.select}
             value={formData.streamer}
-            onChange={(e) => setFormData({ 
-              ...formData, 
-              streamer: e.target.value,
-              account: '' // 重置账号选择
-            })}
+            onChange={(e) => setFormData({ ...formData, streamer: e.target.value })}
           >
             <option value="">请选择主播</option>
             {streamers.map(name => (
@@ -471,20 +464,16 @@ function Home() {
           </select>
         </div>
 
-        {/* 充值账号 */}
+        {/* 充值账号 - 改为手动输入 */}
         <div style={styles.formGroup}>
-          <label style={styles.label}>充值账号 *</label>
-          <select
-            style={styles.select}
+          <label style={styles.label}>充值账号UID *</label>
+          <input
+            type="text"
+            style={styles.input}
+            placeholder="请输入充值账号UID"
             value={formData.account}
             onChange={(e) => setFormData({ ...formData, account: e.target.value })}
-            disabled={!formData.streamer}
-          >
-            <option value="">{formData.streamer ? '请选择账号' : '请先选择主播'}</option>
-            {accounts.map(acc => (
-              <option key={acc} value={acc}>{acc}</option>
-            ))}
-          </select>
+          />
         </div>
 
         {/* 充值类别 */}
