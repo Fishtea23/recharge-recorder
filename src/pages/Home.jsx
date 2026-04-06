@@ -487,8 +487,8 @@ function Home() {
     },
     imageGrid: {
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
-      gap: '10px',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+      gap: '12px',
       marginTop: '12px'
     },
     imageCard: {
@@ -496,12 +496,56 @@ function Home() {
       border: '1px solid #eee',
       borderRadius: '8px',
       overflow: 'hidden',
-      backgroundColor: 'white'
+      backgroundColor: 'white',
+      cursor: 'pointer'
     },
     imagePreview: {
       width: '100%',
-      height: '90px',
+      height: '140px',
       objectFit: 'cover'
+    },
+    imageAmountBadge: {
+      position: 'absolute',
+      bottom: '4px',
+      left: '4px',
+      right: '4px',
+      backgroundColor: 'rgba(24, 144, 255, 0.95)',
+      color: 'white',
+      padding: '4px 8px',
+      borderRadius: '4px',
+      fontSize: '14px',
+      fontWeight: 'bold',
+      textAlign: 'center'
+    },
+    modal: {
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0,0,0,0.9)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000,
+      padding: '20px'
+    },
+    modalImage: {
+      maxWidth: '90vw',
+      maxHeight: '80vh',
+      objectFit: 'contain'
+    },
+    modalCloseBtn: {
+      position: 'absolute',
+      top: '20px',
+      right: '20px',
+      width: '40px',
+      height: '40px',
+      borderRadius: '50%',
+      backgroundColor: 'rgba(255,255,255,0.9)',
+      border: 'none',
+      fontSize: '24px',
+      cursor: 'pointer'
     },
     imageInfo: {
       padding: '8px'
@@ -835,11 +879,12 @@ function Home() {
                 type="file"
                 accept="image/*"
                 capture="environment"
+                multiple
                 style={styles.hiddenInput}
                 onChange={(e) => handleEntryImageSelect(entry.id, e)}
               />
               
-              {/* 相册 input */}
+              {/* 相册 input - 支持多选 */}
               <input
                 ref={el => fileInputRefs.current[`${entry.id}-gallery`] = el}
                 type="file"
@@ -852,58 +897,70 @@ function Home() {
               {/* 图片预览 */}
               {entry.images.length > 0 && (
                 <div style={styles.imageGrid}>
-                  {entry.images.map(img => (
-                    <div key={img.id} style={styles.imageCard}>
-                      {img.loading && (
-                        <span style={styles.loadingBadge}>识别中...</span>
-                      )}
-                      <button
-                        type="button"
-                        style={styles.removeBtn}
-                        onClick={() => removeEntryImage(entry.id, img.id)}
-                      >
-                        ×
-                      </button>
-                      <img
-                        src={img.preview}
-                        alt="充值截图"
-                        style={styles.imagePreview}
-                      />
-                      <div style={styles.imageInfo}>
-                        <select
-                          style={styles.amountTypeSelect}
-                          value={img.amountType}
-                          onChange={(e) => handleEntryImageAmountTypeChange(entry.id, img.id, e.target.value)}
+                  {entry.images.map(img => {
+                    const displayAmount = img.amountType === 'custom' 
+                      ? (img.customAmount || '待填写')
+                      : (img.amount || '待选择')
+                    return (
+                      <div key={img.id} style={styles.imageCard}>
+                        {img.loading && (
+                          <span style={styles.loadingBadge}>AI识别中...</span>
+                        )}
+                        <button
+                          type="button"
+                          style={styles.removeBtn}
+                          onClick={() => removeEntryImage(entry.id, img.id)}
                         >
-                          <option value="preset">选择金额</option>
-                          <option value="custom">手动输入</option>
-                        </select>
-                        
-                        {img.amountType === 'preset' && (
+                          ×
+                        </button>
+                        {/* 图片点击放大 */}
+                        <img
+                          src={img.preview}
+                          alt="充值截图"
+                          style={styles.imagePreview}
+                          onClick={() => setEnlargedImage(img.preview)}
+                        />
+                        {/* 显示金额 */}
+                        <div style={styles.imageAmountBadge}>
+                          ¥{displayAmount}
+                        </div>
+                        {/* 修改金额按钮 */}
+                        <div style={styles.imageInfo}>
                           <select
-                            style={styles.presetSelect}
-                            value={img.amount}
-                            onChange={(e) => handleEntryImagePresetChange(entry.id, img.id, e.target.value)}
+                            style={styles.amountTypeSelect}
+                            value={img.amountType}
+                            onChange={(e) => handleEntryImageAmountTypeChange(entry.id, img.id, e.target.value)}
                           >
-                            <option value="">选择</option>
-                            {PRESET_AMOUNTS.map(amt => (
-                              <option key={amt} value={amt}>¥{amt}</option>
-                            ))}
+                            <option value="preset">选金额</option>
+                            <option value="custom">手动填</option>
                           </select>
-                        )}
-                        
-                        {img.amountType === 'custom' && (
-                          <input
-                            type="number"
-                            style={styles.customInput}
-                            placeholder="金额"
-                            value={img.customAmount}
-                            onChange={(e) => handleEntryImageCustomChange(entry.id, img.id, e.target.value)}
-                          />
-                        )}
+                          
+                          {img.amountType === 'preset' && (
+                            <select
+                              style={styles.presetSelect}
+                              value={img.amount}
+                              onChange={(e) => handleEntryImagePresetChange(entry.id, img.id, e.target.value)}
+                            >
+                              <option value="">选金额</option>
+                              {PRESET_AMOUNTS.map(amt => (
+                                <option key={amt} value={amt}>¥{amt}</option>
+                              ))}
+                            </select>
+                          )}
+                          
+                          {img.amountType === 'custom' && (
+                            <input
+                              type="number"
+                              style={styles.customInput}
+                              placeholder="输入金额"
+                              value={img.customAmount}
+                              onChange={(e) => handleEntryImageCustomChange(entry.id, img.id, e.target.value)}
+                            />
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </div>
@@ -950,6 +1007,14 @@ function Home() {
       <div style={styles.adminLink}>
         <a href="/admin" style={styles.link}>进入管理员页面 →</a>
       </div>
+
+      {/* 放大图片查看 */}
+      {enlargedImage && (
+        <div style={styles.modal} onClick={() => setEnlargedImage(null)}>
+          <button style={styles.modalCloseBtn} onClick={() => setEnlargedImage(null)}>×</button>
+          <img src={enlargedImage} alt="放大查看" style={styles.modalImage} />
+        </div>
+      )}
     </div>
   )
 }

@@ -143,14 +143,17 @@ function Admin() {
         
         row.height = rowHeight
 
-        // 为每个图片添加超链接和尝试嵌入缩略图
+        // 为每个图片添加超链接
         if (rowData.imageUrls.length > 0) {
           const linkCell = row.getCell(10) // 截图链接列
+          // 使用公式创建超链接
+          const hyperlinks = rowData.imageUrls.map((url, idx) => {
+            return `HYPERLINK("${url}","[图${idx + 1}]")`
+          }).join(' & " " & ')
+          
           linkCell.value = {
-            richText: rowData.imageUrls.map((url, idx) => ({
-              text: `[图${idx + 1}] `,
-              hyperlink: url
-            }))
+            formula: `=${hyperlinks}`,
+            result: rowData.imageUrls.map((_, idx) => `[图${idx + 1}]`).join(' ')
           }
           linkCell.style = {
             font: { color: { argb: 'FF1890FF' }, underline: true }
