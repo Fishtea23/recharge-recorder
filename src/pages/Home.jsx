@@ -28,6 +28,7 @@ function Home() {
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState({ type: '', text: '' })
+  const [enlargedImage, setEnlargedImage] = useState(null) // 放大查看的图片
   
   const fileInputRefs = useRef({})
 
