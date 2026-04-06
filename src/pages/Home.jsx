@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
-import { supabase, streamers } from '../utils/supabase'
+import { supabase, streamers, getGameAccountNames, getUidByAccount } from '../utils/supabase'
 
 function Home() {
   const [formData, setFormData] = useState({
     streamer: '',
-    account: '',
+    gameAccount: '',
+    accountUid: '',
     category: '',
     alipayAccount: '',
     isReimbursed: '否',
@@ -18,6 +19,8 @@ function Home() {
   const [message, setMessage] = useState({ type: '', text: '' })
   const fileInputRef = useRef(null)
 
+  const gameAccountNames = getGameAccountNames()
+
   // 计算总金额
   useEffect(() => {
     const total = images.reduce((sum, img) => {
@@ -26,6 +29,16 @@ function Home() {
     }, 0)
     setTotalAmount(total)
   }, [images])
+
+  // 处理游戏账号选择
+  const handleGameAccountChange = (accountName) => {
+    const uid = getUidByAccount(accountName)
+    setFormData({
+      ...formData,
+      gameAccount: accountName,
+      accountUid: uid
+    })
+  }
 
   // 调用 Gemini API 识别金额
   const recognizeAmount = async (base64Image) => {
@@ -149,8 +162,8 @@ function Home() {
       setMessage({ type: 'error', text: '请选择主播姓名' })
       return
     }
-    if (!formData.account.trim()) {
-      setMessage({ type: 'error', text: '请填写充值账号UID' })
+    if (!formData.gameAccount) {
+      setMessage({ type: 'error', text: '请选择游戏账号' })
       return
     }
     if (!formData.category) {
@@ -201,7 +214,8 @@ function Home() {
         .from('recharge_records')
         .insert([{
           streamer: formData.streamer,
-          account: formData.account,
+          account: formData.accountUid,  // 存入UID
+          game_account_name: formData.gameAccount,  // 同时存入游戏账号名称
           category: formData.category,
           alipay_account: formData.alipayAccount,
           amounts: amounts,
@@ -218,7 +232,8 @@ function Home() {
       // 重置表单
       setFormData({
         streamer: '',
-        account: '',
+        gameAccount: '',
+        accountUid: '',
         category: '',
         alipayAccount: '',
         isReimbursed: '否',
@@ -289,6 +304,24 @@ function Home() {
       borderRadius: '8px',
       outline: 'none',
       touchAction: 'manipulation'
+    },
+    inputReadonly: {
+      width: '100%',
+      padding: '12px',
+      fontSize: '16px',
+      border: '1px solid #ddd',
+      borderRadius: '8px',
+      backgroundColor: '#f5f5f5',
+      color: '#666'
+    },
+    uidDisplay: {
+      marginTop: '6px',
+      fontSize: '13px',
+      color: '#1890ff',
+      padding: '8px 12px',
+      backgroundColor: '#f0f9ff',
+      borderRadius: '6px',
+      border: '1px solid #91caff'
     },
     radioGroup: {
       display: 'flex',
@@ -464,16 +497,24 @@ function Home() {
           </select>
         </div>
 
-        {/* 充值账号 - 改为手动输入 */}
+        {/* 游戏账号选择 */}
         <div style={styles.formGroup}>
-          <label style={styles.label}>充值账号UID *</label>
-          <input
-            type="text"
-            style={styles.input}
-            placeholder="请输入充值账号UID"
-            value={formData.account}
-            onChange={(e) => setFormData({ ...formData, account: e.target.value })}
-          />
+          <label style={styles.label}>游戏账号 *</label>
+          <select
+            style={styles.select}
+            value={formData.gameAccount}
+            onChange={(e) => handleGameAccountChange(e.target.value)}
+          >
+            <option value="">请选择游戏账号</option>
+            {gameAccountNames.map(name => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+          {formData.accountUid && (
+            <div style={styles.uidDisplay}>
+              对应UID: {formData.accountUid}
+            </div>
+          )}
         </div>
 
         {/* 充值类别 */}
@@ -597,7 +638,7 @@ function Home() {
           <label style={styles.label}>提交日期</label>
           <input
             type="text"
-            style={{ ...styles.input, backgroundColor: '#f5f5f5' }}
+            style={styles.inputReadonly}
             value={formData.submitDate}
             readOnly
           />
